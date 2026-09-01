@@ -12,7 +12,6 @@ from aiogram import Router, F, types
 import database as db
 import bot_info
 from utils import show_menu_with_sticker
-from config import REFERRAL_LOCK_AMOUNT, REFERRAL_MIN_VOLUME_GB
 from keyboards import referral_menu
 
 router = Router(name="referral")
@@ -26,20 +25,28 @@ async def referral(callback: types.CallbackQuery):
         return
 
     stats = db.get_referral_stats(user["id"])
+    referral_enabled = db.get_referral_enabled()
+    referral_min_volume = db.get_referral_min_volume_gb()
+    referral_reward = db.get_referral_reward_amount()
     invite_link = f"https://t.me/{bot_info.get('bot_username')}?start={stats['invite_code']}"
 
+    condition_text = (
+        f"شرط خرید حداقل {referral_min_volume} گیگ فعال است"
+        if referral_enabled
+        else "شرط حداقل حجم خرید خاموش است و هر خرید پولی واجد شرایط است"
+    )
     text = (
         f"👥 دعوت دوستان و کسب درآمد 💸\n\n"
-        f"دوستانتو دعوت کن و به‌ازای هر دعوت موفق، {REFERRAL_LOCK_AMOUNT:,} تومان پاداش نقدی بگیر! 🎁\n\n"
+        f"دوستانتو دعوت کن و به‌ازای هر دعوت موفق، {referral_reward:,} تومان پاداش نقدی بگیر! 🎁\n\n"
         f"🔗 لینک اختصاصی شما:\n{invite_link}\n\n"
         f"🔑 کد اختصاصی: {stats['invite_code']}\n\n"
         f"👤 تعداد دعوت: {stats['invited_count']}\n"
         f"✅ دعوت‌های موفق: {stats['successful_invites']}\n"
         f"🔓 مبلغ آزاد شده: {stats['released_amount']:,} تومان\n"
         f"🔒 مبلغ در انتظار: {user['locked_wallet']:,} تومان\n\n"
-        f"ℹ️ به‌ازای هر دوستی که با لینک شما عضو شود و یک خرید حجم {REFERRAL_MIN_VOLUME_GB} گیگ یا بیشتر "
-        f"انجام دهد، {REFERRAL_LOCK_AMOUNT:,} تومان به‌صورت خودکار به کیف پول شما آزاد می‌شود. "
-        f"(تست رایگان و خریدهای زیر {REFERRAL_MIN_VOLUME_GB} گیگ پاداش را آزاد نمی‌کنند)"
+        f"ℹ️ {condition_text}. "
+        f"پاداش {referral_reward:,} تومان به‌صورت خودکار به کیف پول شما آزاد می‌شود. "
+        f"(تست رایگان پاداش را آزاد نمی‌کند)"
     )
     await show_menu_with_sticker(callback.bot, callback.message.chat.id, "referral", text, reply_markup=referral_menu())
     await callback.answer()
