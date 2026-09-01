@@ -16,7 +16,7 @@ def _get_env(key: str, required: bool = True, default=None):
         raise RuntimeError(f"متغیر محیطی الزامی '{key}' در فایل .env تنظیم نشده است.")
     return value
 
-TOKEN = _get_env("TOKEN")
+TOKEN = _get_env("TOKEN").strip().strip("\"").strip("\'")
 ADMIN_ID = int(_get_env("ADMIN_ID"))
 
 CARD_NUMBER = _get_env("CARD_NUMBER")
@@ -47,8 +47,23 @@ UNIQUEPAY_ENABLED = bool(UNIQUEPAY_BUSINESS_TOKEN)
 # مساوی یا کمتر از این عدد، درگاه آنلاین (نه در خرید پلن، نه در شارژ کیف
 # پول) نمایش داده نمی‌شود و کاربر باید از کارت‌به‌کارت یا کیف پول استفاده کند.
 ONLINE_PAYMENT_MIN_AMOUNT = 50_000
-# سقف امن شارژ کیف پول؛ جلوی اینوویس‌ها و رسیدهای غیرمنطقی را می‌گیرد.
-MAX_WALLET_TOPUP = int(_get_env("MAX_WALLET_TOPUP", required=False, default="100000000"))
+
+# محدودیت شارژ کیف پول (تومان)
+# حداقل و حداکثر مبلغی که کاربر می‌تواند برای شارژ کیف پول ثبت کند.
+MIN_WALLET_TOPUP = int(_get_env("MIN_WALLET_TOPUP", required=False, default="50000"))
+MAX_WALLET_TOPUP = int(_get_env("MAX_WALLET_TOPUP", required=False, default="3000000"))
+
+if MIN_WALLET_TOPUP < 0 or MAX_WALLET_TOPUP < MIN_WALLET_TOPUP:
+    raise RuntimeError("محدوده شارژ کیف پول نامعتبر است: MIN_WALLET_TOPUP باید کمتر یا مساوی MAX_WALLET_TOPUP باشد.")
+
+# پرداخت رمزارزی — کیف پول‌ها از .env خوانده می‌شوند و از پنل «اطلاعات ربات» نیز
+# قابل Override هستند. اگر هیچ‌کدام تنظیم نباشند، گزینه Crypto در پرداخت اصلاً نمایش داده نمی‌شود.
+CRYPTO_USDT_TRON_WALLET = _get_env("CRYPTO_USDT_TRON_WALLET", required=False, default="")
+CRYPTO_TON_WALLET = _get_env("CRYPTO_TON_WALLET", required=False, default="")
+CRYPTO_TRX_WALLET = _get_env("CRYPTO_TRX_WALLET", required=False, default="")
+CRYPTO_PAYMENT_ENABLED = bool(CRYPTO_TON_WALLET or CRYPTO_TRX_WALLET or CRYPTO_USDT_TRON_WALLET)
+CRYPTO_USDT_TOMAN_RATE = 0
+CRYPTO_USDT_ENABLED = bool(CRYPTO_USDT_TRON_WALLET)
 
 DATABASE_PATH = _get_env("DATABASE_PATH", required=False, default="database.db")
 
