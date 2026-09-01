@@ -24,6 +24,8 @@ from config import (
     REFERRAL_MIN_VOLUME_GB,
     UNIQUEPAY_ENABLED,
     ONLINE_PAYMENT_MIN_AMOUNT,
+    MIN_WALLET_TOPUP,
+    MAX_WALLET_TOPUP,
 )
 from keyboards import (
     wallet_menu,
@@ -39,6 +41,27 @@ from keyboards import (
 logger = logging.getLogger(__name__)
 
 router = Router(name="wallet")
+
+
+def _wallet_topup_error(amount: int) -> str | None:
+    """اعتبارسنجی متمرکز مبلغ شارژ کیف پول (تومان)."""
+    if amount < MIN_WALLET_TOPUP:
+        return f"❌ حداقل مبلغ شارژ کیف پول {MIN_WALLET_TOPUP:,} تومان است."
+    if amount > MAX_WALLET_TOPUP:
+        return f"❌ حداکثر مبلغ شارژ کیف پول {MAX_WALLET_TOPUP:,} تومان است."
+    return None
+
+
+async def _reject_invalid_wallet_topup(target, amount: int) -> bool:
+    """اگر مبلغ خارج از بازه باشد پیام خطا می‌دهد و True برمی‌گرداند."""
+    error = _wallet_topup_error(amount)
+    if not error:
+        return False
+    if isinstance(target, types.CallbackQuery):
+        await target.answer(error, show_alert=True)
+    else:
+        await target.answer(error)
+    return True
 
 
 def _get_user_row(telegram_id):
@@ -131,7 +154,7 @@ async def transactions(callback: types.CallbackQuery):
 @router.callback_query(F.data == "charge")
 async def charge(callback: types.CallbackQuery):
     await show_menu_with_sticker(callback.bot, callback.message.chat.id, "wallet_charge", 
-        "💳 مبلغ شارژ را انتخاب کنید:", reply_markup=charge_amount_keyboard()
+        f"💳 مبلغ شارژ را انتخاب کنید:\n\n📌 حداقل شارژ: {MIN_WALLET_TOPUP:,} تومان\n📌 حداکثر شارژ: {MAX_WALLET_TOPUP:,} تومان", reply_markup=charge_amount_keyboard()
     )
     await callback.answer()
 
@@ -141,6 +164,10 @@ async def _offer_charge_payment_method(target, amount: int, state: FSMContext):
     درگاه آنلاین فعال باشد و مبلغ بیشتر از ONLINE_PAYMENT_MIN_AMOUNT باشد،
     روش پرداخت را از کاربر می‌پرسد (آنلاین یا کارت‌به‌کارت)؛ در غیر این
     صورت دقیقاً مثل قبل مستقیم به مرحله‌ی کارت‌به‌کارت می‌رود."""
+    if await _reject_invalid_wallet_topup(target, amount):
+        await state.clear()
+        return
+
     if UNIQUEPAY_ENABLED and amount > ONLINE_PAYMENT_MIN_AMOUNT:
         text = f"💳 مبلغ: {amount:,} تومان\n\n💰 روش پرداخت را انتخاب کنید:"
         markup = charge_payment_method_keyboard(amount)
@@ -170,7 +197,10 @@ async def charge_amount(callback: types.CallbackQuery, state: FSMContext):
 
     if action == "custom":
         await state.set_state(UserStates.waiting_custom_charge)
-        await show_menu_with_sticker(callback.bot, callback.message.chat.id, "wallet_charge", "💵 مبلغ دلخواه را به تومان ارسال کنید:")
+        await show_menu_with_sticker(
+            callback.bot, callback.message.chat.id, "wallet_charge",
+            f"💵 مبلغ دلخواه را به تومان ارسال کنید:\n\n📌 حداقل: {MIN_WALLET_TOPUP:,} تومان\n📌 حداکثر: {MAX_WALLET_TOPUP:,} تومان"
+        )
     else:
         amount = int(action)
         await _offer_charge_payment_method(callback, amount, state)
@@ -193,6 +223,9 @@ async def charge_pay_with_card(callback: types.CallbackQuery, state: FSMContext)
         amount = int(callback.data.replace("chargepay_card_", ""))
     except ValueError:
         await callback.answer(ui_editor.get_alert_text("msg_4b6223ac73", "❌ درخواست نامعتبر است."), show_alert=True)
+        return
+
+    if await _reject_invalid_wallet_topup(callback, amount):
         return
 
     invoicing_user = db.get_user(callback.from_user.id)
@@ -230,6 +263,9 @@ async def change_payment_method_wallet(callback: types.CallbackQuery, state: FSM
         await callback.answer(ui_editor.get_alert_text("msg_4b6223ac73", "❌ درخواست نامعتبر است."), show_alert=True)
         return
 
+    if await _reject_invalid_wallet_topup(callback, amount):
+        return
+
     data = await state.get_data()
     invoice_id = data.get("wallet_card_invoice_id")
     if invoice_id:
@@ -250,6 +286,9 @@ async def charge_pay_online(callback: types.CallbackQuery):
         amount = int(callback.data.replace("chargepay_online_", ""))
     except ValueError:
         await callback.answer(ui_editor.get_alert_text("msg_4b6223ac73", "❌ درخواست نامعتبر است."), show_alert=True)
+        return
+
+    if await _reject_invalid_wallet_topup(callback, amount):
         return
 
     if amount <= ONLINE_PAYMENT_MIN_AMOUNT:
@@ -315,6 +354,14 @@ async def finalize_wallet_charge_online_payment(bot, payment: dict) -> int | Non
     قفل اتمیک claim_online_payment_for_finalize استفاده می‌شود تا اگر پولر
     پس‌زمینه‌ی ربات (bot.py) و دکمه‌ی «بررسی کن» هم‌زمان صدا زده شوند، کیف
     پول فقط یک‌بار شارژ شود."""
+    amount = int(payment["price"])
+    if _wallet_topup_error(amount):
+        logger.error(
+            "Rejected out-of-range wallet online payment during finalization: user=%s amount=%s",
+            payment.get("telegram_id"), amount,
+        )
+        return None
+
     if payment["status"] == "paid":
         return payment["id"]
 
@@ -353,6 +400,12 @@ async def receive_receipt(message: types.Message, state: FSMContext):
 
     if amount is None:
         await message.answer(progress_bar(2, 2) + "❌ مشکلی پیش آمد، لطفاً دوباره از منوی شارژ شروع کنید.")
+        await state.clear()
+        return
+
+    error = _wallet_topup_error(int(amount))
+    if error:
+        await message.answer(error)
         await state.clear()
         return
 
