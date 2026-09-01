@@ -21,7 +21,7 @@ from keyboards import (
     main_reply_keyboard,
     admin_reply_keyboard,
 )
-from config import ADMIN_ID, REFERRAL_LOCK_AMOUNT, REFERRAL_MIN_VOLUME_GB
+from config import ADMIN_ID
 
 router = Router(name="start")
 logger = logging.getLogger(__name__)
@@ -57,17 +57,25 @@ async def _notify_referrer_of_new_join(bot, user: dict):
         return
 
     referrer = db.get_user_by_id(user["referrer_id"])
+    referral_min_volume = db.get_referral_min_volume_gb()
+    referral_reward = db.get_referral_reward_amount()
+    referral_enabled = db.get_referral_enabled()
     if referrer is None:
         return
 
     try:
+        referral_condition_text = (
+            f"پس از خرید حداقل {referral_min_volume} گیگ"
+            if referral_enabled
+            else "پس از هر خرید پولی"
+        )
         await bot.send_message(
             int(referrer["telegram_id"]),
             f"🎉 یک عضو جدید از طریق لینک دعوت شما وارد ربات شد و عضویتش تأیید شد!\n\n"
             f"👤 نام: {user['name']}\n"
             f"🆔 آیدی: `{user['telegram_id']}`\n\n"
-            f"💰 پس از اینکه این کاربر یک خرید حجم {REFERRAL_MIN_VOLUME_GB} گیگ یا بیشتر انجام دهد، "
-            f"{REFERRAL_LOCK_AMOUNT:,} تومان به‌صورت خودکار به کیف پول شما آزاد می‌شود.",
+            f"💰 {referral_condition_text} توسط این کاربر، "
+            f"{referral_reward:,} تومان به‌صورت خودکار به کیف پول شما آزاد می‌شود.",
             parse_mode="Markdown",
         )
     except Exception as e:
